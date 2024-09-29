@@ -77,23 +77,22 @@ class AtreaWebsocket:
             await asyncio.sleep(1)
 
     async def connect(self, on_data, on_close):
-        try:
-            async with websockets.connect(
-                "ws://%s/api/ws" % self._host, ping_interval=None, ping_timeout=None, logger=LOGGER
-            ) as websocket:
-                try:
+        while True:
+            try:
+                async with websockets.connect(
+                    "ws://%s/api/ws" % self._host, ping_interval=None, ping_timeout=None, logger=LOGGER
+                ) as websocket:
                     self._websocket = websocket
                     async for message in websocket:
                         LOGGER.debug("Received %s" % message)
                         await on_data(json.loads(message))
-                except Exception as err:
-                    LOGGER.debug(err)
-                    await on_close()
-                    return
-        except Exception as err:
-            LOGGER.debug(err)
-            await on_close()
-            return
+            except websockets.ConnectionClosed:
+                LOGGER.debug("Connection closed, retrying...")
+                await asyncio.sleep(1)  # 
+            except Exception as err:
+                LOGGER.debug(err)
+                await on_close()
+                return
 
 class AmotionAtreaCoordinator(DataUpdateCoordinator):
     """AmotionAtrea custom coordinator."""
@@ -141,7 +140,7 @@ class AmotionAtrea:
             self._messages[message['id']] = message['response']
             LOGGER.debug(message['response'])
             LOGGER.debug(self._messages)
-        elif message['type'] == 'event' and message['event'] == 'ui_info' and self.logged_in:
+        elif message['type'] == 'event' and message['event'] == 'ui_info':
             self.status['current_temperature'] = message["args"]["unit"]["temp_sup"]
             self.status['setpoint'] = message["args"]["requests"]["temp_request"]
             self.status['temp_oda'] = message["args"]["unit"]['temp_oda']
@@ -233,8 +232,8 @@ class AmotionAtrea:
         token = await self.update(message_id = msg_id)
         LOGGER.debug("token is")
         await self.send('{"endpoint":"login","args":{"token":"%s"}}' % token)
-        await self.ui_scheme()
         self.logged_in = True
+        await self.ui_scheme()
 
     async def ui_scheme(self):
         response_id = await self.send('{ "endpoint": "ui_info_scheme", "args": null }')
